@@ -119,9 +119,9 @@ Each follow-up requires its own scope, failure model, cost controls, and complet
 - [x] Rate limit and cache use production Upstash.
 - [x] GitHub and Upstash credentials remain server-only by construction and configuration.
 - [x] Error states provide a safe next action without leaking upstream data.
-- [ ] Keyboard, screen-reader labels, contrast, mobile layout, and reduced motion are checked.
+- [x] Keyboard, screen-reader labels, contrast, mobile layout, and reduced motion are checked.
 - [x] Unit, integration, formatting, lint, type, and build checks pass.
 - [x] Vercel environment and canonical URL are verified.
 - [x] Documentation matches the locally verified implementation.
 
-The remaining unchecked item requires a final keyboard, screen-reader, and contrast QA pass. The Vercel deployment, canonical origin, distributed cache MISS/HIT behavior, and five-per-window rate limit have been verified in production. The current Upstash resource must be claimed by its owner to persist beyond its temporary bootstrap period.
+All code and deployment checks have passed. The Vercel deployment, canonical origin, distributed cache MISS/HIT behavior, five-per-window rate limit, keyboard flow, screen-reader semantics, contrast, mobile layout, and reduced-motion behavior have been verified. The current Upstash resource must be claimed by its owner to persist beyond its temporary bootstrap period.
