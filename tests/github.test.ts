@@ -216,6 +216,26 @@ describe("GitHub adapter", () => {
     ).rejects.toMatchObject({ code: "GITHUB_RATE_LIMITED", retryAfter: 60 });
   });
 
+  it("maps transport and malformed upstream failures to safe errors", async () => {
+    const timeout = new Error("timed out");
+    timeout.name = "AbortError";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(timeout)),
+    );
+    await expect(
+      analyzeGitHubRepository({ owner: "example", repo: "project" }),
+    ).rejects.toMatchObject({ code: "GITHUB_TIMEOUT", status: 504 });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse("not a repository")),
+    );
+    await expect(
+      analyzeGitHubRepository({ owner: "example", repo: "project" }),
+    ).rejects.toBeInstanceOf(Error);
+  });
+
   it("does not include a GitHub authorization header without a token", async () => {
     const headersSeen: HeadersInit[] = [];
     vi.stubGlobal(

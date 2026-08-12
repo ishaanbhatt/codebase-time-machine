@@ -116,7 +116,7 @@ Each follow-up requires its own scope, failure model, cost controls, and complet
 - [x] Static demo builds without external credentials and is labeled fictional.
 - [x] Public repository analysis respects all documented caps in tests and a live API smoke test.
 - [x] Partial coverage is present in the API contract and explorer disclosure.
-- [ ] Rate limit and cache use production Upstash.
+- [x] Rate limit and cache use production Upstash.
 - [x] GitHub and Upstash credentials remain server-only by construction and configuration.
 - [x] Error states provide a safe next action without leaking upstream data.
 - [ ] Keyboard, screen-reader labels, contrast, mobile layout, and reduced motion are checked.
@@ -124,4 +124,4 @@ Each follow-up requires its own scope, failure model, cost controls, and complet
 - [x] Vercel environment and canonical URL are verified.
 - [x] Documentation matches the locally verified implementation.
 
-Unchecked items require production Upstash plus a final keyboard, screen-reader, and contrast QA pass. The Vercel deployment and canonical origin have been verified independently of those remaining gates.
+The remaining unchecked item requires a final keyboard, screen-reader, and contrast QA pass. The Vercel deployment, canonical origin, distributed cache MISS/HIT behavior, and five-per-window rate limit have been verified in production. The current Upstash resource must be claimed by its owner to persist beyond its temporary bootstrap period.

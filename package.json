@@ -6,7 +6,7 @@
   "description": "Turn a public GitHub repository into an interactive story of how its codebase evolved.",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "packageManager": "npm@11.10.1",
   "scripts": {
