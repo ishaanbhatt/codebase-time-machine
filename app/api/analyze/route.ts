@@ -20,6 +20,8 @@ export const maxDuration = 20;
 export const dynamic = "force-dynamic";
 const MAX_REQUEST_BYTES = 1024;
 const MAX_RESPONSE_BYTES = 3_500_000;
+const ROUTE_WORK_BUDGET_MS = 18_000;
+const LOCK_TTL_SECONDS = 25;
 
 async function readBoundedBody(request: Request) {
   if (!request.body) return "";
@@ -58,6 +60,7 @@ function errorResponse(
 }
 
 export async function POST(request: Request) {
+  const workDeadline = Date.now() + ROUTE_WORK_BUDGET_MS;
   const length = Number(request.headers.get("content-length") ?? 0);
   if (length > MAX_REQUEST_BYTES)
     return errorResponse("PAYLOAD_TOO_LARGE", "The request is too large.", 413);
@@ -172,7 +175,10 @@ export async function POST(request: Request) {
   if (redis) {
     let acquired;
     try {
-      acquired = await redis.set(lockKey, lockToken, { nx: true, ex: 18 });
+      acquired = await redis.set(lockKey, lockToken, {
+        nx: true,
+        ex: LOCK_TTL_SECONDS,
+      });
     } catch {
       return errorResponse(
         "RATE_LIMIT_UNAVAILABLE",
@@ -223,7 +229,7 @@ export async function POST(request: Request) {
         { ...headers, "Retry-After": String(globalLimit.retryAfter) },
         globalLimit.retryAfter,
       );
-    const rawAnalysis = await analyzeGitHubRepository(ref);
+    const rawAnalysis = await analyzeGitHubRepository(ref, workDeadline);
     const analysis = repositoryAnalysisSchema.parse(rawAnalysis);
     if (Buffer.byteLength(JSON.stringify(analysis)) > MAX_RESPONSE_BYTES)
       return errorResponse(

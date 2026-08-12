@@ -72,7 +72,26 @@ describe("production cache route", () => {
     expect(response.headers.get("x-analysis-cache")).toBe("MISS");
     expect(mocks.analyze).toHaveBeenCalledOnce();
     expect(mocks.set).toHaveBeenCalledTimes(2);
+    expect(mocks.set.mock.calls[0][2]).toMatchObject({ nx: true, ex: 25 });
     expect(mocks.eval).toHaveBeenCalledOnce();
+  });
+
+  it("uses one route-wide deadline that preflight latency cannot reset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const startedAt = Date.now();
+    mocks.get.mockResolvedValue(null);
+    mocks.set.mockResolvedValue("OK");
+    mocks.repositoryLimit.mockImplementation(async () => {
+      vi.setSystemTime(startedAt + 3_000);
+      return { success: true, retryAfter: 0 };
+    });
+    mocks.analyze.mockResolvedValue(demoAnalysis);
+    const response = await POST(request());
+    expect(response.status).toBe(200);
+    expect(mocks.analyze.mock.calls[0][1]).toBe(startedAt + 18_000);
+    expect(mocks.set.mock.calls[0][2].ex * 1000).toBeGreaterThan(18_000);
+    vi.useRealTimers();
   });
 
   it("rejects a cold-cache stampede while another analysis owns the lock", async () => {

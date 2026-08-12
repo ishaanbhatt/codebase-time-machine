@@ -53,7 +53,7 @@ GET /repos/{owner}/{repository}/commits?per_page=60
 GET /repos/{owner}/{repository}/git/trees/{treeSha}?recursive=1
 ```
 
-The repository metadata is validated before commits are requested, so an accidentally overprivileged token cannot fetch private commit history. The tree endpoint is called for at most five unique selected checkpoints. Tree payloads are fetched sequentially to avoid concurrent multi-megabyte buffering. Every response is streamed under a byte ceiling, retains an eight-second abort timeout through body consumption, and is schema-validated before use. A shared 18-second analysis deadline keeps the complete sequence inside the Vercel function envelope.
+The repository metadata is validated before commits are requested, so an accidentally overprivileged token cannot fetch private commit history. The tree endpoint is called for at most five unique selected checkpoints. Tree payloads are fetched sequentially to avoid concurrent multi-megabyte buffering. Every response is streamed under a byte ceiling, retains an eight-second abort timeout through body consumption, and is schema-validated before use. A route-wide absolute 18-second work deadline starts before network-backed guards and keeps the complete sequence inside the Vercel function envelope. The 25-second lock TTL outlives that work budget so a second function cannot begin duplicate work during validation or cache cleanup.
 
 The optional `GITHUB_TOKEN` remains server-side. Without it, GitHub applies a substantially smaller unauthenticated quota.
 

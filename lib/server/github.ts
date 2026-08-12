@@ -215,8 +215,8 @@ function selectCheckpoints(commits: CommitInput[]) {
 
 export async function analyzeGitHubRepository(
   ref: RepositoryRef,
+  deadline = Date.now() + ANALYSIS_TIMEOUT_MS,
 ): Promise<RepositoryAnalysis> {
-  const deadline = Date.now() + ANALYSIS_TIMEOUT_MS;
   const owner = encodeURIComponent(ref.owner);
   const repo = encodeURIComponent(ref.repo);
   const repoPayload = await githubJson(
