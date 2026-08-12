@@ -55,9 +55,12 @@ export function buildSnapshots(trees: TreeInput[]): RepositorySnapshot[] {
   const normalized = [...trees].sort(
     (a, b) => compareText(a.date, b.date) || compareText(a.sha, b.sha),
   );
+  const normalizedFiles = normalized.map((tree) =>
+    normalizeFiles(tree.entries),
+  );
   const presence = new Map<string, number>();
   const fileSets = normalized.map(
-    (tree) => new Set(normalizeFiles(tree.entries).map((file) => file.path)),
+    (_tree, index) => new Set(normalizedFiles[index].map((file) => file.path)),
   );
   for (let index = 1; index < fileSets.length; index += 1) {
     const paths = new Set([...fileSets[index - 1], ...fileSets[index]]);
@@ -66,7 +69,7 @@ export function buildSnapshots(trees: TreeInput[]): RepositorySnapshot[] {
         presence.set(path, (presence.get(path) ?? 0) + 1);
   }
   return normalized.map((tree, index) => {
-    const files = normalizeFiles(tree.entries).map((file) => ({
+    const files = normalizedFiles[index].map((file) => ({
       ...file,
       changeScore: presence.get(file.path) ?? 0,
     }));

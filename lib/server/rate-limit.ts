@@ -70,6 +70,41 @@ export async function limitAnalysis(request: Request): Promise<LimitResult> {
   };
 }
 
+export async function limitUpstream(repository: string) {
+  const redis = redisFromEnvironment();
+  if (!redis) {
+    if (process.env.VERCEL_ENV === "production")
+      throw new Error("RATE_LIMIT_STORE_UNAVAILABLE");
+    return { success: true, retryAfter: 0 };
+  }
+  const [globalResult, repositoryResult] = await Promise.all([
+    new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(8, "1 h"),
+      prefix: "ctm:upstream:global",
+    }).limit("github"),
+    new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(3, "15 m"),
+      prefix: "ctm:upstream:repository",
+    }).limit(repository),
+  ]);
+  const blocked = [globalResult, repositoryResult].filter(
+    (result) => !result.success,
+  );
+  return {
+    success: blocked.length === 0,
+    retryAfter: blocked.length
+      ? Math.max(
+          1,
+          ...blocked.map((result) =>
+            Math.ceil((result.reset - Date.now()) / 1000),
+          ),
+        )
+      : 0,
+  };
+}
+
 export function rateLimitHeaders(result: LimitResult) {
   const retryAfter = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
   return {

@@ -22,7 +22,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiError, FileNode, RepositoryAnalysis } from "@/lib/contracts";
 import { demoAnalysis } from "@/lib/demo";
 
@@ -44,9 +44,11 @@ const fmtNumber = (value: number) =>
 function HeroForm({
   onAnalyze,
   busy,
+  error,
 }: {
   onAnalyze: (value: string) => void;
   busy: boolean;
+  error: ApiError["error"] | null;
 }) {
   const [value, setValue] = useState("");
   function submit(event: FormEvent) {
@@ -70,6 +72,8 @@ function HeroForm({
         placeholder="github.com/owner/repository"
         autoComplete="url"
         spellCheck={false}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "analysis-error" : undefined}
       />
       <button className="button primary" disabled={busy || !value.trim()}>
         {busy ? <LoaderCircle className="spin" /> : <Search />}{" "}
@@ -92,6 +96,12 @@ function Status({
   onDemo: () => void;
   onRetry: () => void;
 }) {
+  const errorRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!error) return;
+    errorRef.current?.focus();
+    errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [error]);
   if (busy)
     return (
       <section className="status-card" aria-live="polite" aria-busy="true">
@@ -116,7 +126,13 @@ function Status({
   if (!error) return null;
   const limited = error.code === "RATE_LIMITED";
   return (
-    <section className="status-card error" role="alert">
+    <section
+      className="status-card error"
+      id="analysis-error"
+      role="alert"
+      ref={errorRef}
+      tabIndex={-1}
+    >
       <div className="status-icon">
         <CircleAlert />
       </div>
@@ -182,6 +198,7 @@ function Story({
             key={`${m.sha}-${i}`}
             className={`story-card ${m.sha === active ? "active" : ""}`}
             onClick={() => jump(index)}
+            aria-pressed={m.sha === active}
           >
             <span className="story-number">
               {String(i + 1).padStart(2, "0")}
@@ -213,12 +230,12 @@ function FileMap({ files }: { files: FileNode[] }) {
   const [list, setList] = useState(false);
   const groups = useMemo(() => {
     const map = new Map<string, FileNode[]>();
-    files.forEach((f) =>
-      map.set(f.directory || "root", [
-        ...(map.get(f.directory || "root") ?? []),
-        f,
-      ]),
-    );
+    files.forEach((file) => {
+      const directory = file.directory || "root";
+      const bucket = map.get(directory);
+      if (bucket) bucket.push(file);
+      else map.set(directory, [file]);
+    });
     return [...map];
   }, [files]);
   return (
@@ -239,12 +256,14 @@ function FileMap({ files }: { files: FileNode[] }) {
           <button
             className={!list ? "active" : ""}
             onClick={() => setList(false)}
+            aria-pressed={!list}
           >
             Map
           </button>
           <button
             className={list ? "active" : ""}
             onClick={() => setList(true)}
+            aria-pressed={list}
           >
             Accessible list
           </button>
@@ -258,16 +277,22 @@ function FileMap({ files }: { files: FileNode[] }) {
                 <Folder /> {dir}
               </h3>
               <div>
-                {dirFiles.map((f) => (
-                  <button
+                {dirFiles.slice(0, 300).map((f) => (
+                  <div
                     className={`file-node ${tone(f)}`}
                     key={f.path}
                     title={`${f.path} · ${fmtNumber(f.size)} bytes · change score ${f.changeScore}`}
                   >
                     <FileCode2 />
                     <span>{f.name}</span>
-                  </button>
+                  </div>
                 ))}
+                {dirFiles.length > 300 && (
+                  <p className="map-overflow">
+                    +{fmtNumber(dirFiles.length - 300)} more files in the list
+                    view
+                  </p>
+                )}
               </div>
             </section>
           ))}
@@ -357,6 +382,12 @@ function Explorer({
     return () => clearInterval(timer);
   }, [playing, analysis.snapshots.length]);
   function toggle() {
+    if (analysis.snapshots.length < 2) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setPlaying(false);
+      setIndex(index === analysis.snapshots.length - 1 ? 0 : index + 1);
+      return;
+    }
     if (!playing && index === analysis.snapshots.length - 1) setIndex(0);
     setPlaying((value) => !value);
   }
@@ -413,23 +444,26 @@ function Explorer({
           <button
             className={view === "story" ? "active" : ""}
             onClick={() => setView("story")}
+            aria-pressed={view === "story"}
           >
             <BookOpen /> Story
           </button>
           <button
             className={view === "map" ? "active" : ""}
             onClick={() => setView("map")}
+            aria-pressed={view === "map"}
           >
             <Code2 /> File map
           </button>
           <button
             className={view === "contributors" ? "active" : ""}
             onClick={() => setView("contributors")}
+            aria-pressed={view === "contributors"}
           >
             <Users /> People
           </button>
         </nav>
-        <main className="view">
+        <div className="view">
           <header className="view-head">
             <div>
               <p className="eyebrow">
@@ -444,12 +478,15 @@ function Explorer({
           )}
           {view === "map" && <FileMap files={snapshot.files} />}
           {view === "contributors" && <Contributors analysis={analysis} />}
-        </main>
+        </div>
       </div>
       <footer className="timeline">
         <div className="timeline-buttons">
           <button
-            onClick={() => setIndex(Math.max(0, index - 1))}
+            onClick={() => {
+              setPlaying(false);
+              setIndex(Math.max(0, index - 1));
+            }}
             disabled={index === 0}
             aria-label="Previous snapshot"
           >
@@ -459,6 +496,7 @@ function Explorer({
             className="play"
             onClick={toggle}
             aria-label={playing ? "Pause history" : "Play history"}
+            disabled={analysis.snapshots.length < 2}
           >
             {playing ? (
               <Pause fill="currentColor" />
@@ -467,9 +505,10 @@ function Explorer({
             )}
           </button>
           <button
-            onClick={() =>
-              setIndex(Math.min(analysis.snapshots.length - 1, index + 1))
-            }
+            onClick={() => {
+              setPlaying(false);
+              setIndex(Math.min(analysis.snapshots.length - 1, index + 1));
+            }}
             disabled={index === analysis.snapshots.length - 1}
             aria-label="Next snapshot"
           >
@@ -486,6 +525,7 @@ function Explorer({
           </div>
           <input
             aria-label="Repository history position"
+            aria-valuetext={`${fmtDate(snapshot.date)}, ${snapshot.label}`}
             type="range"
             min="0"
             max={analysis.snapshots.length - 1}
@@ -610,7 +650,7 @@ export function TimeMachineApp() {
           <a href="#explorer">Live demo</a>
           <a
             className="github-link"
-            href="https://github.com"
+            href="https://github.com/ishaanbhatt/codebase-time-machine"
             target="_blank"
             rel="noreferrer"
           >
@@ -629,9 +669,9 @@ export function TimeMachineApp() {
             </h1>
             <p className="lede">
               Turn public GitHub history into a clear, interactive story of
-              files, people, and architectural change.
+              files, people, and structural evolution.
             </p>
-            <HeroForm onAnalyze={analyze} busy={busy} />
+            <HeroForm onAnalyze={analyze} busy={busy} error={error} />
             <div className="demo-row">
               <span>Or start instantly:</span>
               <button onClick={openDemo}>
@@ -678,13 +718,13 @@ export function TimeMachineApp() {
               <aside>
                 <Sparkles />
                 <span>
-                  <small>Architecture milestone</small>
+                  <small>Structural milestone</small>
                   <strong>Rendering engine extracted</strong>
                 </span>
               </aside>
             </div>
             <footer>
-              <button>
+              <button onClick={openDemo} aria-label="Open the fictional demo">
                 <Play fill="currentColor" />
               </button>
               <span>
@@ -712,7 +752,7 @@ export function TimeMachineApp() {
           <header>
             <p className="eyebrow">From commits to a story</p>
             <h2>
-              Architecture should be visible,
+              Codebase evolution should be visible,
               <br />
               not buried in a changelog.
             </h2>
@@ -751,7 +791,7 @@ export function TimeMachineApp() {
             onDemo={openDemo}
             onRetry={() => last && analyze(last)}
           />
-          {!busy && !error && (
+          {!busy && (
             <Explorer
               key={`${analysis.repository.fullName}-${demo}`}
               analysis={analysis}

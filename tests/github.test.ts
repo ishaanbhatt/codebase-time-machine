@@ -130,6 +130,7 @@ describe("GitHub adapter", () => {
             headers: {
               "content-type": "application/json",
               "retry-after": "45",
+              "x-ratelimit-remaining": "0",
             },
           },
         ),
@@ -142,6 +143,77 @@ describe("GitHub adapter", () => {
       status: 503,
       retryAfter: 45,
     });
+  });
+
+  it("checks repository visibility before requesting commits", async () => {
+    const requested: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        requested.push(String(input));
+        return jsonResponse({ ...repository, private: true });
+      }),
+    );
+    await expect(
+      analyzeGitHubRepository({ owner: "example", repo: "private" }),
+    ).rejects.toMatchObject({ code: "PRIVATE_REPOSITORY", status: 403 });
+    expect(requested).toHaveLength(1);
+  });
+
+  it("deduplicates checkpoint tree requests", async () => {
+    const duplicateTrees = commits.map((commit) => ({
+      ...commit,
+      commit: { ...commit.commit, tree: { sha: "shared-tree" } },
+    }));
+    const requested: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        requested.push(url);
+        if (url.endsWith("/example/project")) return jsonResponse(repository);
+        if (url.includes("/commits?")) return jsonResponse(duplicateTrees);
+        return jsonResponse({ truncated: false, tree: [] });
+      }),
+    );
+    await analyzeGitHubRepository({ owner: "example", repo: "project" });
+    expect(requested.filter((url) => url.includes("/git/trees/"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("rejects oversized upstream bodies before parsing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("x".repeat(1_500_001), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    await expect(
+      analyzeGitHubRepository({ owner: "example", repo: "project" }),
+    ).rejects.toMatchObject({ code: "GITHUB_RESPONSE_TOO_LARGE", status: 422 });
+  });
+
+  it("uses a conservative retry when GitHub omits retry headers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          {},
+          {
+            status: 429,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    );
+    await expect(
+      analyzeGitHubRepository({ owner: "example", repo: "project" }),
+    ).rejects.toMatchObject({ code: "GITHUB_RATE_LIMITED", retryAfter: 60 });
   });
 
   it("does not include a GitHub authorization header without a token", async () => {

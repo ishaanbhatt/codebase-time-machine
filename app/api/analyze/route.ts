@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import {
   analyzeRequestSchema,
+  repositoryAnalysisSchema,
   type ApiError,
-  type RepositoryAnalysis,
 } from "@/lib/contracts";
 import { canonicalRepositoryKey, parseRepositoryRef } from "@/lib/repository";
 import { analyzeGitHubRepository, GitHubError } from "@/lib/server/github";
 import {
   hasDistributedStore,
   limitAnalysis,
+  limitUpstream,
   rateLimitHeaders,
   sharedRedis,
 } from "@/lib/server/rate-limit";
@@ -16,6 +17,31 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 20;
 export const dynamic = "force-dynamic";
+const MAX_REQUEST_BYTES = 1024;
+const MAX_RESPONSE_BYTES = 3_500_000;
+
+async function readBoundedBody(request: Request) {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_REQUEST_BYTES) {
+        await reader.cancel();
+        throw new Error("PAYLOAD_TOO_LARGE");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 function errorResponse(
   code: string,
@@ -32,7 +58,7 @@ function errorResponse(
 
 export async function POST(request: Request) {
   const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > 1024)
+  if (length > MAX_REQUEST_BYTES)
     return errorResponse("PAYLOAD_TOO_LARGE", "The request is too large.", 413);
   if (
     !request.headers
@@ -66,16 +92,16 @@ export async function POST(request: Request) {
     );
   let payload: unknown;
   try {
-    const body = await request.text();
-    if (body.length > 1024)
+    const body = await readBoundedBody(request);
+    payload = JSON.parse(body);
+  } catch (error) {
+    if (error instanceof Error && error.message === "PAYLOAD_TOO_LARGE")
       return errorResponse(
         "PAYLOAD_TOO_LARGE",
         "The request is too large.",
         413,
         headers,
       );
-    payload = JSON.parse(body);
-  } catch {
     return errorResponse(
       "INVALID_JSON",
       "The request body is not valid JSON.",
@@ -102,11 +128,10 @@ export async function POST(request: Request) {
   const redis = sharedRedis();
   const cacheKey = `ctm:analysis:v1:${canonicalRepositoryKey(ref)}`;
   if (redis) {
-    const cached = await redis
-      .get<RepositoryAnalysis>(cacheKey)
-      .catch(() => null);
-    if (cached)
-      return NextResponse.json(cached, {
+    const cached = await redis.get<unknown>(cacheKey).catch(() => null);
+    const validCached = repositoryAnalysisSchema.safeParse(cached);
+    if (validCached.success)
+      return NextResponse.json(validCached.data, {
         headers: {
           ...headers,
           "Cache-Control": "private, no-store",
@@ -120,8 +145,53 @@ export async function POST(request: Request) {
       503,
       headers,
     );
+  let upstreamLimit;
   try {
-    const analysis = await analyzeGitHubRepository(ref);
+    upstreamLimit = await limitUpstream(canonicalRepositoryKey(ref));
+  } catch {
+    return errorResponse(
+      "RATE_LIMIT_UNAVAILABLE",
+      "Repository analysis is temporarily paused while its safety controls recover.",
+      503,
+      headers,
+    );
+  }
+  if (!upstreamLimit.success)
+    return errorResponse(
+      "UPSTREAM_LIMITED",
+      "The shared GitHub analysis budget is resting. Explore the demo and try again later.",
+      429,
+      { ...headers, "Retry-After": String(upstreamLimit.retryAfter) },
+      upstreamLimit.retryAfter,
+    );
+
+  const lockKey = `${cacheKey}:lock`;
+  const lockToken = crypto.randomUUID();
+  let ownsLock = false;
+  if (redis) {
+    const acquired = await redis
+      .set(lockKey, lockToken, { nx: true, ex: 25 })
+      .catch(() => null);
+    ownsLock = acquired === "OK";
+    if (!ownsLock)
+      return errorResponse(
+        "ANALYSIS_IN_PROGRESS",
+        "This repository is already being analyzed. Try again in a few seconds.",
+        409,
+        { ...headers, "Retry-After": "3" },
+        3,
+      );
+  }
+  try {
+    const rawAnalysis = await analyzeGitHubRepository(ref);
+    const analysis = repositoryAnalysisSchema.parse(rawAnalysis);
+    if (Buffer.byteLength(JSON.stringify(analysis)) > MAX_RESPONSE_BYTES)
+      return errorResponse(
+        "ANALYSIS_TOO_LARGE",
+        "This repository is too large for a safe interactive analysis.",
+        422,
+        headers,
+      );
     if (redis)
       await redis.set(cacheKey, analysis, { ex: 900 }).catch(() => undefined);
     return NextResponse.json(analysis, {
@@ -151,5 +221,14 @@ export async function POST(request: Request) {
       502,
       headers,
     );
+  } finally {
+    if (redis && ownsLock)
+      await redis
+        .eval(
+          "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+          [lockKey],
+          [lockToken],
+        )
+        .catch(() => undefined);
   }
 }

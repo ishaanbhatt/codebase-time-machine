@@ -121,7 +121,7 @@ Each follow-up requires its own scope, failure model, cost controls, and complet
 - [x] Error states provide a safe next action without leaking upstream data.
 - [ ] Keyboard, screen-reader labels, contrast, mobile layout, and reduced motion are checked.
 - [x] Unit, integration, formatting, lint, type, and build checks pass.
-- [ ] Vercel environment and canonical URL are verified.
+- [x] Vercel environment and canonical URL are verified.
 - [x] Documentation matches the locally verified implementation.
 
-Unchecked items require a real Vercel deployment with Upstash plus visual browser QA. The current workspace browser cannot access localhost, so those items must not be inferred from passing code checks alone.
+Unchecked items require production Upstash plus a final keyboard, screen-reader, and contrast QA pass. The Vercel deployment and canonical origin have been verified independently of those remaining gates.

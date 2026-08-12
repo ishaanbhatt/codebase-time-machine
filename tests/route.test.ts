@@ -47,6 +47,13 @@ describe("POST /api/analyze", () => {
     });
   });
 
+  it("counts multibyte request content in bytes", async () => {
+    const response = await POST(
+      request(JSON.stringify({ repository: "界".repeat(400) })),
+    );
+    expect(response.status).toBe(413);
+  });
+
   it("returns stable errors for malformed JSON and unsupported hosts", async () => {
     const malformed = await POST(request("{"));
     expect(malformed.status).toBe(400);

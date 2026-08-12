@@ -14,40 +14,51 @@ import type { RepositoryRef } from "@/lib/repository";
 
 const API_ROOT = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 8_000;
+const DEFAULT_RESPONSE_LIMIT = 1_500_000;
+const TREE_RESPONSE_LIMIT = 7_500_000;
 const repoSchema = z.object({
-  name: z.string(),
-  full_name: z.string(),
-  description: z.string().nullable(),
-  html_url: z.string().url(),
-  default_branch: z.string(),
-  language: z.string().nullable(),
+  name: z.string().max(100),
+  full_name: z.string().max(201),
+  description: z.string().max(500).nullable(),
+  html_url: z.string().url().max(500),
+  default_branch: z.string().max(240),
+  language: z.string().max(100).nullable(),
   stargazers_count: z.number(),
   forks_count: z.number(),
   updated_at: z.string(),
   private: z.boolean(),
 });
 const commitSchema = z.object({
-  sha: z.string(),
-  html_url: z.string().url(),
+  sha: z.string().max(100),
+  html_url: z.string().url().max(500),
   commit: z.object({
-    message: z.string(),
-    author: z.object({ name: z.string(), date: z.string() }).nullable(),
-    committer: z.object({ name: z.string(), date: z.string() }).nullable(),
-    tree: z.object({ sha: z.string() }),
+    message: z.string().max(100_000),
+    author: z
+      .object({ name: z.string().max(200), date: z.string().max(50) })
+      .nullable(),
+    committer: z
+      .object({ name: z.string().max(200), date: z.string().max(50) })
+      .nullable(),
+    tree: z.object({ sha: z.string().max(100) }),
   }),
   author: z
-    .object({ login: z.string(), avatar_url: z.string().url() })
+    .object({
+      login: z.string().max(100),
+      avatar_url: z.string().url().max(500),
+    })
     .nullable(),
 });
 const treeSchema = z.object({
   truncated: z.boolean(),
-  tree: z.array(
-    z.object({
-      path: z.string(),
-      type: z.string(),
-      size: z.number().optional(),
-    }),
-  ),
+  tree: z
+    .array(
+      z.object({
+        path: z.string().max(240),
+        type: z.enum(["blob", "tree", "commit"]),
+        size: z.number().optional(),
+      }),
+    )
+    .max(100_000),
 });
 
 export class GitHubError extends Error {
@@ -72,7 +83,44 @@ function githubHeaders() {
   };
 }
 
-async function githubJson(path: string): Promise<unknown> {
+async function readBoundedJson(response: Response, limit: number) {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel();
+        throw new GitHubError(
+          "GITHUB_RESPONSE_TOO_LARGE",
+          "This repository is too large for a safe interactive analysis.",
+          422,
+        );
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode()) as unknown;
+  } catch (error) {
+    if (error instanceof GitHubError) throw error;
+    throw new GitHubError(
+      "GITHUB_INVALID_RESPONSE",
+      "GitHub returned data that could not be analyzed safely.",
+      502,
+    );
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function githubJson(
+  path: string,
+  responseLimit = DEFAULT_RESPONSE_LIMIT,
+): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -104,13 +152,19 @@ async function githubJson(path: string): Promise<unknown> {
         "This public repository could not be found.",
         404,
       );
-    if (response.status === 403 || response.status === 429) {
-      const resetAt = Number(response.headers.get("x-ratelimit-reset")) * 1000;
-      const retryAfter =
-        Number(response.headers.get("retry-after")) ||
-        (Number.isFinite(resetAt)
+    const rateRemaining = response.headers.get("x-ratelimit-remaining");
+    if (
+      response.status === 429 ||
+      (response.status === 403 && rateRemaining === "0")
+    ) {
+      const retryHeader = response.headers.get("retry-after");
+      const resetHeader = response.headers.get("x-ratelimit-reset");
+      const resetAt = resetHeader ? Number(resetHeader) * 1000 : Number.NaN;
+      const retryAfter = retryHeader
+        ? Math.max(1, Number(retryHeader) || 60)
+        : Number.isFinite(resetAt) && resetAt > Date.now()
           ? Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
-          : 60);
+          : 60;
       throw new GitHubError(
         "GITHUB_RATE_LIMITED",
         "GitHub's request limit has been reached. Try again later or explore the demo.",
@@ -124,7 +178,7 @@ async function githubJson(path: string): Promise<unknown> {
       response.status >= 500 ? 502 : 422,
     );
   }
-  return response.json();
+  return readBoundedJson(response, responseLimit);
 }
 
 function selectCheckpoints(commits: CommitInput[]) {
@@ -145,12 +199,7 @@ export async function analyzeGitHubRepository(
 ): Promise<RepositoryAnalysis> {
   const owner = encodeURIComponent(ref.owner);
   const repo = encodeURIComponent(ref.repo);
-  const [repoPayload, commitPayload] = await Promise.all([
-    githubJson(`/repos/${owner}/${repo}`),
-    githubJson(
-      `/repos/${owner}/${repo}/commits?per_page=${analysisLimits.history}`,
-    ),
-  ]);
+  const repoPayload = await githubJson(`/repos/${owner}/${repo}`);
   const repository = repoSchema.parse(repoPayload);
   if (repository.private)
     throw new GitHubError(
@@ -158,6 +207,9 @@ export async function analyzeGitHubRepository(
       "Only public repositories are supported.",
       403,
     );
+  const commitPayload = await githubJson(
+    `/repos/${owner}/${repo}/commits?per_page=${analysisLimits.history}`,
+  );
   const parsedCommits = z.array(commitSchema).parse(commitPayload);
   if (!parsedCommits.length)
     throw new GitHubError(
@@ -193,19 +245,24 @@ export async function analyzeGitHubRepository(
               : 0,
     );
   const checkpoints = selectCheckpoints(commits);
-  const treePayloads = await Promise.all(
-    checkpoints.map((commit) =>
-      githubJson(
-        `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(commit.treeSha)}?recursive=1`,
-      ),
-    ),
-  );
-  const trees: TreeInput[] = treePayloads.map((payload, index) => {
+  const payloadByTree = new Map<string, unknown>();
+  for (const checkpoint of checkpoints) {
+    if (!payloadByTree.has(checkpoint.treeSha))
+      payloadByTree.set(
+        checkpoint.treeSha,
+        await githubJson(
+          `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(checkpoint.treeSha)}?recursive=1`,
+          TREE_RESPONSE_LIMIT,
+        ),
+      );
+  }
+  const trees: TreeInput[] = checkpoints.map((checkpoint) => {
+    const payload = payloadByTree.get(checkpoint.treeSha);
     const parsed = treeSchema.parse(payload);
     return {
-      sha: checkpoints[index].sha,
-      date: checkpoints[index].date,
-      message: checkpoints[index].message,
+      sha: checkpoint.sha,
+      date: checkpoint.date,
+      message: checkpoint.message,
       entries: parsed.tree,
       truncated: parsed.truncated,
     };
