@@ -236,6 +236,36 @@ describe("GitHub adapter", () => {
     ).rejects.toBeInstanceOf(Error);
   });
 
+  it("keeps the timeout active while reading the response body", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () =>
+              controller.error(
+                new DOMException("The operation was aborted", "AbortError"),
+              ),
+            );
+          },
+        });
+        return new Response(stream, { status: 200 });
+      }),
+    );
+    const analysis = analyzeGitHubRepository({
+      owner: "example",
+      repo: "project",
+    });
+    const rejection = expect(analysis).rejects.toMatchObject({
+      code: "GITHUB_TIMEOUT",
+      status: 504,
+    });
+    await vi.advanceTimersByTimeAsync(8_001);
+    await rejection;
+    vi.useRealTimers();
+  });
+
   it("does not include a GitHub authorization header without a token", async () => {
     const headersSeen: HeadersInit[] = [];
     vi.stubGlobal(

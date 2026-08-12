@@ -9,7 +9,8 @@ import { analyzeGitHubRepository, GitHubError } from "@/lib/server/github";
 import {
   hasDistributedStore,
   limitAnalysis,
-  limitUpstream,
+  limitGlobalUpstream,
+  limitRepository,
   rateLimitHeaders,
   sharedRedis,
 } from "@/lib/server/rate-limit";
@@ -145,9 +146,9 @@ export async function POST(request: Request) {
       503,
       headers,
     );
-  let upstreamLimit;
+  let repositoryLimit;
   try {
-    upstreamLimit = await limitUpstream(canonicalRepositoryKey(ref));
+    repositoryLimit = await limitRepository(canonicalRepositoryKey(ref));
   } catch {
     return errorResponse(
       "RATE_LIMIT_UNAVAILABLE",
@@ -156,22 +157,30 @@ export async function POST(request: Request) {
       headers,
     );
   }
-  if (!upstreamLimit.success)
+  if (!repositoryLimit.success)
     return errorResponse(
       "UPSTREAM_LIMITED",
       "The shared GitHub analysis budget is resting. Explore the demo and try again later.",
       429,
-      { ...headers, "Retry-After": String(upstreamLimit.retryAfter) },
-      upstreamLimit.retryAfter,
+      { ...headers, "Retry-After": String(repositoryLimit.retryAfter) },
+      repositoryLimit.retryAfter,
     );
 
   const lockKey = `${cacheKey}:lock`;
   const lockToken = crypto.randomUUID();
   let ownsLock = false;
   if (redis) {
-    const acquired = await redis
-      .set(lockKey, lockToken, { nx: true, ex: 25 })
-      .catch(() => null);
+    let acquired;
+    try {
+      acquired = await redis.set(lockKey, lockToken, { nx: true, ex: 18 });
+    } catch {
+      return errorResponse(
+        "RATE_LIMIT_UNAVAILABLE",
+        "Repository analysis is temporarily paused while its safety controls recover.",
+        503,
+        headers,
+      );
+    }
     ownsLock = acquired === "OK";
     if (!ownsLock)
       return errorResponse(
@@ -183,6 +192,37 @@ export async function POST(request: Request) {
       );
   }
   try {
+    if (redis) {
+      const rechecked = await redis.get<unknown>(cacheKey).catch(() => null);
+      const validRechecked = repositoryAnalysisSchema.safeParse(rechecked);
+      if (validRechecked.success)
+        return NextResponse.json(validRechecked.data, {
+          headers: {
+            ...headers,
+            "Cache-Control": "private, no-store",
+            "X-Analysis-Cache": "HIT",
+          },
+        });
+    }
+    let globalLimit;
+    try {
+      globalLimit = await limitGlobalUpstream();
+    } catch {
+      return errorResponse(
+        "RATE_LIMIT_UNAVAILABLE",
+        "Repository analysis is temporarily paused while its safety controls recover.",
+        503,
+        headers,
+      );
+    }
+    if (!globalLimit.success)
+      return errorResponse(
+        "UPSTREAM_LIMITED",
+        "The shared GitHub analysis budget is resting. Explore the demo and try again later.",
+        429,
+        { ...headers, "Retry-After": String(globalLimit.retryAfter) },
+        globalLimit.retryAfter,
+      );
     const rawAnalysis = await analyzeGitHubRepository(ref);
     const analysis = repositoryAnalysisSchema.parse(rawAnalysis);
     if (Buffer.byteLength(JSON.stringify(analysis)) > MAX_RESPONSE_BYTES)

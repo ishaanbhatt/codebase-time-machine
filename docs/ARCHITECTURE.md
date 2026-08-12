@@ -35,8 +35,9 @@ The Next.js App Router renders the product UI. Static content and the demo shoul
 4. Parse a strict `{ repository: string }` request with Zod.
 5. Accept only `owner/repository` or a clean HTTPS `github.com/owner/repository` URL.
 6. Look up a 15-minute analysis cache by normalized owner and repository.
-7. On a miss, retrieve bounded repository metadata from GitHub.
-8. Run the pure analyzer, write the cache on a best-effort basis, and return JSON.
+7. On a miss, apply a per-repository budget and acquire a short distributed lock.
+8. Recheck the cache, apply the global upstream budget, then retrieve bounded data from GitHub.
+9. Run the pure analyzer, validate and size-cap the result, write the cache on a best-effort basis, and return JSON.
 
 Errors use stable machine-readable codes. Responses are `no-store` at the browser/CDN boundary because the shared application cache is controlled explicitly in Upstash.
 
@@ -52,7 +53,7 @@ GET /repos/{owner}/{repository}/commits?per_page=60
 GET /repos/{owner}/{repository}/git/trees/{treeSha}?recursive=1
 ```
 
-The tree endpoint is called for at most five selected checkpoints. Repository metadata and commits are requested in parallel; selected immutable commit trees are then requested in parallel. Each GitHub request has an eight-second abort timeout and validated response schema.
+The repository metadata is validated before commits are requested, so an accidentally overprivileged token cannot fetch private commit history. The tree endpoint is called for at most five unique selected checkpoints. Tree payloads are fetched sequentially to avoid concurrent multi-megabyte buffering. Every response is streamed under a byte ceiling, retains an eight-second abort timeout through body consumption, and is schema-validated before use. A shared 18-second analysis deadline keeps the complete sequence inside the Vercel function envelope.
 
 The optional `GITHUB_TOKEN` remains server-side. Without it, GitHub applies a substantially smaller unauthenticated quota.
 
@@ -75,6 +76,8 @@ Given identical validated inputs, analyzer output is stable. The live GitHub rep
 There is no application database in the MVP. Upstash Redis stores:
 
 - Distributed sliding-window rate-limit counters
+- Per-repository and global GitHub-work budgets
+- Short single-flight locks for uncached repository analyses
 - Completed analysis JSON for 15 minutes under `ctm:analysis:v1:{lowercase-owner}/{lowercase-repository}`
 
 The cache is repository-keyed, not commit-keyed. This is intentionally simple, but it means pushes may take up to 15 minutes to appear. Cache hits still consume an analysis attempt. A transient cache write failure does not discard a successful analysis response.
@@ -85,7 +88,7 @@ No source blobs, repository archives, OAuth tokens, raw IP addresses, durable us
 
 ### Rate limiting
 
-The analysis endpoint allows five attempts per pseudonymous client key in a sliding 15-minute window. The key is an HMAC of the client address. Vercel's forwarded-client header is preferred; the conventional forwarded header exists as a local/proxy fallback.
+The analysis endpoint allows five attempts per pseudonymous client key in a sliding 15-minute window. The key is an HMAC of the client address. Vercel's forwarded-client header is preferred; the conventional forwarded header exists as a local/proxy fallback. Cache misses then pass a per-repository budget before lock acquisition; only the lock owner consumes the small global GitHub-work budget. This ordering prevents concurrent duplicate work from exhausting shared upstream capacity.
 
 Upstash is required in production. If the distributed limiter cannot be created or reached, the costly endpoint returns `503` rather than running without protection. A process-local limiter is available only outside production and resets whenever the process restarts.
 

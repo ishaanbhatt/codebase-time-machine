@@ -14,6 +14,7 @@ import type { RepositoryRef } from "@/lib/repository";
 
 const API_ROOT = "https://api.github.com";
 const REQUEST_TIMEOUT_MS = 8_000;
+const ANALYSIS_TIMEOUT_MS = 18_000;
 const DEFAULT_RESPONSE_LIMIT = 1_500_000;
 const TREE_RESPONSE_LIMIT = 7_500_000;
 const repoSchema = z.object({
@@ -107,6 +108,12 @@ async function readBoundedJson(response: Response, limit: number) {
     return JSON.parse(text + decoder.decode()) as unknown;
   } catch (error) {
     if (error instanceof GitHubError) throw error;
+    if (error instanceof Error && error.name === "AbortError")
+      throw new GitHubError(
+        "GITHUB_TIMEOUT",
+        "GitHub took too long to respond. Please try again.",
+        504,
+      );
     throw new GitHubError(
       "GITHUB_INVALID_RESPONSE",
       "GitHub returned data that could not be analyzed safely.",
@@ -120,9 +127,20 @@ async function readBoundedJson(response: Response, limit: number) {
 async function githubJson(
   path: string,
   responseLimit = DEFAULT_RESPONSE_LIMIT,
+  deadline = Date.now() + ANALYSIS_TIMEOUT_MS,
 ): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const remaining = deadline - Date.now();
+  if (remaining <= 0)
+    throw new GitHubError(
+      "GITHUB_TIMEOUT",
+      "GitHub took too long to respond. Please try again.",
+      504,
+    );
+  const timeout = setTimeout(
+    () => controller.abort(),
+    Math.min(REQUEST_TIMEOUT_MS, remaining),
+  );
   let response: Response;
   try {
     response = await fetch(`${API_ROOT}${path}`, {
@@ -130,7 +148,42 @@ async function githubJson(
       signal: controller.signal,
       cache: "no-store",
     });
+    if (!response.ok) {
+      if (response.status === 404)
+        throw new GitHubError(
+          "REPOSITORY_NOT_FOUND",
+          "This public repository could not be found.",
+          404,
+        );
+      const rateRemaining = response.headers.get("x-ratelimit-remaining");
+      if (
+        response.status === 429 ||
+        (response.status === 403 && rateRemaining === "0")
+      ) {
+        const retryHeader = response.headers.get("retry-after");
+        const resetHeader = response.headers.get("x-ratelimit-reset");
+        const resetAt = resetHeader ? Number(resetHeader) * 1000 : Number.NaN;
+        const retryAfter = retryHeader
+          ? Math.max(1, Number(retryHeader) || 60)
+          : Number.isFinite(resetAt) && resetAt > Date.now()
+            ? Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
+            : 60;
+        throw new GitHubError(
+          "GITHUB_RATE_LIMITED",
+          "GitHub's request limit has been reached. Try again later or explore the demo.",
+          503,
+          retryAfter,
+        );
+      }
+      throw new GitHubError(
+        "GITHUB_ERROR",
+        "GitHub could not complete the repository analysis.",
+        response.status >= 500 ? 502 : 422,
+      );
+    }
+    return await readBoundedJson(response, responseLimit);
   } catch (error) {
+    if (error instanceof GitHubError) throw error;
     if (error instanceof Error && error.name === "AbortError")
       throw new GitHubError(
         "GITHUB_TIMEOUT",
@@ -145,40 +198,6 @@ async function githubJson(
   } finally {
     clearTimeout(timeout);
   }
-  if (!response.ok) {
-    if (response.status === 404)
-      throw new GitHubError(
-        "REPOSITORY_NOT_FOUND",
-        "This public repository could not be found.",
-        404,
-      );
-    const rateRemaining = response.headers.get("x-ratelimit-remaining");
-    if (
-      response.status === 429 ||
-      (response.status === 403 && rateRemaining === "0")
-    ) {
-      const retryHeader = response.headers.get("retry-after");
-      const resetHeader = response.headers.get("x-ratelimit-reset");
-      const resetAt = resetHeader ? Number(resetHeader) * 1000 : Number.NaN;
-      const retryAfter = retryHeader
-        ? Math.max(1, Number(retryHeader) || 60)
-        : Number.isFinite(resetAt) && resetAt > Date.now()
-          ? Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
-          : 60;
-      throw new GitHubError(
-        "GITHUB_RATE_LIMITED",
-        "GitHub's request limit has been reached. Try again later or explore the demo.",
-        503,
-        retryAfter,
-      );
-    }
-    throw new GitHubError(
-      "GITHUB_ERROR",
-      "GitHub could not complete the repository analysis.",
-      response.status >= 500 ? 502 : 422,
-    );
-  }
-  return readBoundedJson(response, responseLimit);
 }
 
 function selectCheckpoints(commits: CommitInput[]) {
@@ -197,9 +216,14 @@ function selectCheckpoints(commits: CommitInput[]) {
 export async function analyzeGitHubRepository(
   ref: RepositoryRef,
 ): Promise<RepositoryAnalysis> {
+  const deadline = Date.now() + ANALYSIS_TIMEOUT_MS;
   const owner = encodeURIComponent(ref.owner);
   const repo = encodeURIComponent(ref.repo);
-  const repoPayload = await githubJson(`/repos/${owner}/${repo}`);
+  const repoPayload = await githubJson(
+    `/repos/${owner}/${repo}`,
+    DEFAULT_RESPONSE_LIMIT,
+    deadline,
+  );
   const repository = repoSchema.parse(repoPayload);
   if (repository.private)
     throw new GitHubError(
@@ -209,6 +233,8 @@ export async function analyzeGitHubRepository(
     );
   const commitPayload = await githubJson(
     `/repos/${owner}/${repo}/commits?per_page=${analysisLimits.history}`,
+    DEFAULT_RESPONSE_LIMIT,
+    deadline,
   );
   const parsedCommits = z.array(commitSchema).parse(commitPayload);
   if (!parsedCommits.length)
@@ -253,6 +279,7 @@ export async function analyzeGitHubRepository(
         await githubJson(
           `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(checkpoint.treeSha)}?recursive=1`,
           TREE_RESPONSE_LIMIT,
+          deadline,
         ),
       );
   }

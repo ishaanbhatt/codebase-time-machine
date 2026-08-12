@@ -198,8 +198,12 @@ summary:focus-visible {
     13px "DM Mono",
     monospace;
 }
+.repo-form input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
 .repo-form input::placeholder {
-  color: #697184;
+  color: #9aa3b5;
 }
 .button {
   min-height: 40px;
@@ -376,7 +380,7 @@ summary:focus-visible {
 }
 .preview-body aside small {
   color: #7f7a93;
-  font-size: 8px;
+  font-size: 10px;
   text-transform: uppercase;
 }
 .preview-body aside strong {
@@ -419,7 +423,7 @@ summary:focus-visible {
 .hero-preview > footer b {
   color: #8790a2;
   font:
-    8px "DM Mono",
+    10px "DM Mono",
     monospace;
 }
 .proof {
@@ -477,7 +481,7 @@ summary:focus-visible {
 .how article > span {
   position: absolute;
   right: 26px;
-  color: #4d5568;
+  color: #8790a2;
   font:
     11px "DM Mono",
     monospace;
@@ -559,8 +563,8 @@ summary:focus-visible {
   gap: 8px;
 }
 .status-card code {
-  color: #687084;
-  font-size: 10px;
+  color: #a0a8b8;
+  font-size: 11px;
 }
 .explorer {
   scroll-margin-top: 18px;
@@ -621,7 +625,7 @@ summary:focus-visible {
   color: #b8a5ff;
   background: #181522;
   font:
-    8px "DM Mono",
+    10px "DM Mono",
     monospace;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -631,7 +635,7 @@ summary:focus-visible {
   overflow: hidden;
   margin: 5px 0 0;
   color: #7d8597;
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -643,13 +647,13 @@ summary:focus-visible {
   gap: 34px;
   border-bottom: 1px solid var(--line);
   color: #747d8f;
-  font-size: 9px;
+  font-size: 11px;
 }
 .stats b {
   margin-right: 4px;
   color: #d8dbe2;
   font:
-    500 9px "DM Mono",
+    500 11px "DM Mono",
     monospace;
 }
 .explorer-body {
@@ -709,7 +713,7 @@ summary:focus-visible {
 }
 .view-head .eyebrow {
   margin-bottom: 6px;
-  font-size: 9px;
+  font-size: 11px;
 }
 .view-head h2 {
   margin: 0;
@@ -744,7 +748,7 @@ summary:focus-visible {
   background: linear-gradient(135deg, #392c5c88, #121620dd);
 }
 .story-number {
-  color: #686f80;
+  color: #9aa3b5;
   font:
     10px "DM Mono",
     monospace;
@@ -757,7 +761,7 @@ summary:focus-visible {
 .story-copy small {
   color: var(--violet);
   font:
-    8px "DM Mono",
+    10px "DM Mono",
     monospace;
   text-transform: uppercase;
 }
@@ -766,15 +770,15 @@ summary:focus-visible {
 }
 .story-copy > span {
   color: #8c94a6;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .story-copy em {
   margin-top: 4px;
   display: flex;
   gap: 5px;
-  color: #737c8e;
-  font-size: 8px;
+  color: #a0a8b8;
+  font-size: 11px;
   font-style: normal;
   line-height: 1.4;
 }
@@ -826,7 +830,7 @@ summary:focus-visible {
   display: flex;
   gap: 14px;
   color: #777f91;
-  font-size: 8px;
+  font-size: 10px;
 }
 .legend span {
   display: flex;
@@ -861,7 +865,7 @@ summary:focus-visible {
   color: #7f8798;
   background: none;
   cursor: pointer;
-  font-size: 8px;
+  font-size: 11px;
 }
 .segmented button.active {
   color: white;
@@ -893,7 +897,7 @@ summary:focus-visible {
   gap: 6px;
   color: #7e879a;
   font:
-    500 8px "DM Mono",
+    500 10px "DM Mono",
     monospace;
 }
 .directory h3 svg {
@@ -925,7 +929,7 @@ summary:focus-visible {
   width: 100%;
   overflow: hidden;
   font:
-    9px "DM Mono",
+    10px "DM Mono",
     monospace;
   text-align: center;
   text-overflow: ellipsis;
@@ -977,7 +981,7 @@ summary:focus-visible {
   top: 0;
   color: #8b93a4;
   background: #11151e;
-  font-size: 8px;
+  font-size: 10px;
   text-transform: uppercase;
 }
 .table-wrap td {
@@ -1042,7 +1046,7 @@ summary:focus-visible {
 .contributors article span {
   margin-top: 3px;
   color: #7f8799;
-  font-size: 9px;
+  font-size: 11px;
 }
 .contributors article > i {
   height: 3px;
@@ -1137,7 +1141,7 @@ summary:focus-visible {
 .timeline-count {
   color: #747d8f;
   font:
-    9px "DM Mono",
+    10px "DM Mono",
     monospace;
   text-align: right;
 }
@@ -1153,7 +1157,7 @@ summary:focus-visible {
   gap: 7px;
   color: #747d8f;
   cursor: pointer;
-  font-size: 9px;
+  font-size: 11px;
   list-style: none;
 }
 .coverage summary::-webkit-details-marker {
@@ -1166,7 +1170,7 @@ summary:focus-visible {
 .coverage > div {
   padding: 0 20px 16px;
   color: #747d8f;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.6;
 }
 .coverage p {

@@ -100,7 +100,12 @@ function Status({
   useEffect(() => {
     if (!error) return;
     errorRef.current?.focus();
-    errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    errorRef.current?.scrollIntoView({
+      block: "center",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
   }, [error]);
   if (busy)
     return (
