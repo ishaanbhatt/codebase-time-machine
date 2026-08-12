@@ -28,29 +28,9 @@ The project is intentionally smaller than a full Git mining platform. It analyze
 
 See [Architecture](docs/ARCHITECTURE.md) for the request flow and trust boundaries, and [Delivery plan](docs/DELIVERY_PLAN.md) for the release gates.
 
-## Run locally
+## Use the deployed application
 
-### Prerequisites
-
-- Node.js 22 or newer
-- npm 11 or newer
-
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-Upstash is optional during local development. Without it, the app uses an in-memory limiter that resets when the process restarts. A GitHub token is also optional locally, but unauthenticated GitHub API quotas are much lower.
-
-Before opening a pull request, run:
-
-```bash
-npm run check
-npm run format:check
-```
+Codebase Time Machine is deployed on Vercel. Open the project's configured production deployment to explore the built-in demo or analyze a public GitHub repository. No local setup is required to use the application.
 
 ## Environment variables
 
@@ -104,6 +84,25 @@ Every request consumes one of five analysis attempts per 15-minute client window
 ## Contributing and security
 
 Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+### Branches and commits
+
+- Create focused branches from the default branch, using a short descriptive name such as `feat/repository-filters` or `fix/cache-timeout`.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages:
+
+  ```text
+  <type>(optional-scope): concise imperative summary
+  ```
+
+- Common types include `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, and `chore`.
+- Keep each commit focused and explain breaking changes with a `BREAKING CHANGE:` footer when applicable. Examples: `feat: add repository comparison view` and `fix(api): reject malformed GitHub URLs`.
+
+### Pull requests
+
+- Use a clear title that follows the same Conventional Commits style as commits.
+- Describe the user-visible outcome, the motivation, and any limitations or incomplete-coverage behavior.
+- Keep the pull request small enough to review and revert independently. Include tests or documentation updates when the change requires them.
+- Before requesting review, run the checks documented in [CONTRIBUTING.md](CONTRIBUTING.md) and confirm that the deployed behavior remains evidence-grounded and accessible.
 
 ## License
 
