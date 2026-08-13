@@ -79,6 +79,21 @@ function HeroForm({
         {busy ? <LoaderCircle className="spin" /> : <Search />}{" "}
         {busy ? "Analyzing" : "Explore repo"}
       </button>
+      <div className="repo-suggestions" aria-label="Repository suggestions">
+        <span>Try a public repo:</span>
+        {[
+          ["vercel/next.js", "Next.js"],
+          ["facebook/react", "React"],
+        ].map(([repository, label]) => (
+          <button
+            key={repository}
+            type="button"
+            onClick={() => setValue(repository)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </form>
   );
 }
@@ -686,6 +701,17 @@ export function TimeMachineApp() {
                 <ShieldCheck /> Public repos only
               </span>
             </div>
+            <div className="hero-signals" aria-label="Analysis boundaries">
+              <span>
+                <b>60</b> recent commits
+              </span>
+              <span>
+                <b>5</b> tree checkpoints
+              </span>
+              <span>
+                <b>0</b> GitHub login required
+              </span>
+            </div>
           </div>
           <div
             className="hero-preview"
@@ -699,8 +725,12 @@ export function TimeMachineApp() {
               <b>Demo</b>
             </header>
             <div className="preview-body">
+              <div className="preview-orbit" aria-hidden="true" />
               <small>2023</small>
-              <h2>First prototype</h2>
+              <div className="preview-title">
+                <h2>First prototype</h2>
+                <span>01 / 04</span>
+              </div>
               <div className="preview-folders">
                 <section>
                   <Folder />
@@ -727,6 +757,12 @@ export function TimeMachineApp() {
                   <strong>Rendering engine extracted</strong>
                 </span>
               </aside>
+              <div className="preview-activity" aria-hidden="true">
+                <i />
+                <span>+ 8 files</span>
+                <i />
+                <span>new editor core</span>
+              </div>
             </div>
             <footer>
               <button onClick={openDemo} aria-label="Open the fictional demo">
